@@ -29,7 +29,8 @@ struct file_context {
     FILE *file;
     struct chunk *chunks;
     uint cur_chunk;
-    uint cur_position;
+    uint cur_chunk_position;
+    uint total_chunks;
     uint total_lines;
     uint last_line_read;
     bool at_end;
@@ -39,7 +40,8 @@ int count_file_lines(FILE *file);
 int print_file(struct tui *tui, struct file_context *file_context);
 int init_file_context(FILE *file, uint file_lines, struct file_context *file_context);
 void free_file_context(struct file_context *file_context);
-//int scroll_file_context(struct file_context *file_context);
+int scroll_down(struct file_context *file_context);
+int scroll_up(struct file_context *file_context);
 
 int main(int argc, char **argv) {
     srand(time(NULL));
@@ -87,9 +89,10 @@ int main(int argc, char **argv) {
                     if(seq[1] == '[') {
                         switch(seq[2]) {
                             case 'A': //up arrow
+                                scroll_up(&file_context);
                                 break;
                             case 'B': //down arrow
-                                //scroll_file_context(&file_context);
+                                scroll_down(&file_context);
                                 break;
                             case 'C': //right arrow
                                 break;
@@ -105,7 +108,10 @@ int main(int argc, char **argv) {
             } else {
                 switch(seq[0]) {
                     case 'j':
-                        //scroll_file_context(&file_context);
+                        scroll_down(&file_context);
+                        break;
+                    case 'k':
+                        scroll_up(&file_context);
                         break;
                 }
             }
@@ -126,15 +132,14 @@ int count_file_lines(FILE *file) {
     wchar_t *buf = malloc(4096 * sizeof(wchar_t));
     int lines = 0;
     while(1) {
-        size_t read_size = fread(buf, sizeof(wchar_t), 4096, file);
+        fgetws(buf, 4096, file);
         if(ferror(file)) {
             return -1;
         }
-        for(int i = 0; i < read_size; i++) {
-            if(buf[i] == L'\n') {
-                lines++;
-            }
-        }
+        size_t length = wcslen(buf);
+        if(length > 0 && buf[length - 1] == L'\n') {
+            lines++;
+        } 
         if(feof(file)) {
             break;
         }
@@ -179,12 +184,13 @@ int print_file(struct tui *tui, struct file_context *file_context) {
     struct print_options print_opts = { .x = LINE_NUMBER_PREFIX_SIZE, .y = 0, .fg_color = NULL, .bg_color = NULL };
     int prev_line_number = -1;
     struct chunk *cur_chunk = &file_context->chunks[file_context->cur_chunk];
-    for(uint i = file_context->cur_position; i < ROWS; i++) {
+    uint max_line = cur_chunk->size < ROWS ? cur_chunk->size : ROWS;
+    for(uint i = file_context->cur_chunk_position; i < max_line; i++) {
         struct line *cur_line = &cur_chunk->lines[i];
         result = print_line(tui, &line_print_opts, &print_opts, &prev_line_number, line_nums, cur_line);
     }
     struct chunk *next_chunk = &file_context->chunks[file_context->cur_chunk + 1];
-    uint max_line = next_chunk->size < file_context->cur_position ? next_chunk->size : file_context->cur_position;
+    max_line = next_chunk->size < file_context->cur_chunk_position ? next_chunk->size : file_context->cur_chunk_position;
     for(uint i = 0; i < max_line; i++) {
         struct line *cur_line = &next_chunk->lines[i];
         result = print_line(tui, &line_print_opts, &print_opts, &prev_line_number, line_nums, cur_line);
@@ -194,6 +200,9 @@ int print_file(struct tui *tui, struct file_context *file_context) {
 
 int fill_chunk(struct file_context *file_context, uint chunk_idx) {
     struct chunk *chunk = &file_context->chunks[chunk_idx];
+    if(chunk->lines != NULL) {
+        return 0;
+    }
     chunk->size = 0;
     chunk->lines = malloc(ROWS * sizeof(struct line));
     for(uint i = 0; i < ROWS; i++) {
@@ -230,10 +239,13 @@ int init_file_context(FILE *file, uint file_lines, struct file_context *file_con
     file_context->at_end = false;
     file_context->total_lines = file_lines;
     file_context->cur_chunk = 0;
-    file_context->cur_position = 0;
-    uint total_chunks = ceil((double)file_lines / ROWS);
-    file_context->chunks = malloc(total_chunks * sizeof(struct chunk));
-    file_context->last_line_read = 0;
+    file_context->cur_chunk_position = 0;
+    file_context->total_chunks = ceil((double)file_lines / ROWS);
+    file_context->chunks = malloc(file_context->total_chunks * sizeof(struct chunk));
+    for(uint i = 0; i < file_context->total_chunks; i++) {
+        file_context->chunks[i].lines = NULL;
+    }
+    file_context->last_line_read = 1;
     int status = fill_chunk(file_context, 0); 
     if(status != 0) {
         return status;
@@ -241,41 +253,45 @@ int init_file_context(FILE *file, uint file_lines, struct file_context *file_con
     return 0;
 }
 
-//int scroll_file_context(struct file_context *file_context) {
-//    if(file_context->at_end) {
-//        return 0;
-//    }
-//    struct line *cur_line = &file_context->lines[file_context->position];
-//
-//    fgetws(cur_line->data, FILE_COLS, file_context->file);
-//    cur_line->line_number = file_context->last_line_read;
-//    uint cur_buf_length = wcslen(cur_line->data);
-//    for(uint j = 0; j < cur_buf_length; j++) {
-//        if(cur_line->data[j] == L'\n') {
-//            file_context->last_line_read++;
-//            cur_line->data[j] = L' ';
-//        }
-//        if(cur_line->data[j] == L'\r') {
-//            cur_line->data[j] = L' ';
-//        }
-//    }
-//    if(ferror(file_context->file)) {
-//        return -1; 
-//    }
-//    if(feof(file_context->file)) {
-//        file_context->at_end = true;
-//    }
-//    if(file_context->position < ROWS - 1) {
-//        file_context->position++;
-//    } else {
-//        file_context->position = 0;
-//    }
-//    return 0;
-//}
+int scroll_down(struct file_context *file_context) {
+    uint on_screen_line = file_context->cur_chunk_position % ROWS;
+    if(file_context->total_chunks - 1 <= file_context->cur_chunk) {
+        return 0;
+    }
+    if(on_screen_line == 0) {
+        fill_chunk(file_context, file_context->cur_chunk + 1);
+        file_context->cur_chunk_position++;
+    } else if(on_screen_line == ROWS - 1) {
+        file_context->cur_chunk++;
+        file_context->cur_chunk_position = 0;
+    } else {
+        if(file_context->chunks[file_context->cur_chunk + 1].size > on_screen_line) {
+            file_context->cur_chunk_position++;
+        }
+    }
+    return 0;
+}
+
+int scroll_up(struct file_context *file_context) {
+    uint on_screen_line = file_context->cur_chunk_position % ROWS;
+    if(on_screen_line == 0 && file_context->cur_chunk == 0) {
+        return 0;
+    }
+    if(on_screen_line == 0) {
+        file_context->cur_chunk_position = ROWS - 1;
+        file_context->cur_chunk--;
+    } else {
+        file_context->cur_chunk_position--;
+    }
+    return 0;
+}
 
 void free_file_context(struct file_context *file_context) {
     fclose(file_context->file);
-    for(uint i = 0; i < ceil((double)file_context->total_lines / ROWS); i++) {
+    for(uint i = 0; i < file_context->total_chunks; i++) {
+        if(file_context->chunks[i].lines == NULL) {
+            continue;
+        } 
         for(uint j = 0; j < ROWS; j++) {
             free(file_context->chunks[i].lines[j].data);
         }
@@ -283,4 +299,3 @@ void free_file_context(struct file_context *file_context) {
     }
     free(file_context->chunks);
 }
-
