@@ -17,6 +17,8 @@ struct tui *init_tui(size_t rows, size_t cols) {
     struct tui *tui = malloc(sizeof(struct tui));
     tui->rows = rows;
     tui->cols = cols;
+    tui->debug = malloc(cols * sizeof(wchar_t));
+    tui->debug[0] = L'\0';
     init_buffer(&tui->buf, rows, cols);
     size_t str_buf_size = rows * cols * sizeof(wchar_t) * 20 + 1;
     init_str_buffer(str_buf_size, &tui->str_buf);
@@ -26,12 +28,16 @@ struct tui *init_tui(size_t rows, size_t cols) {
 void free_tui(struct tui *tui) {
     free_buffer(&tui->buf, tui->rows);
     free_str_buffer(&tui->str_buf);
+    free(tui->debug);
     free(tui);
 }
 
 void refresh(struct tui *tui) {
     render_buffer_to_str(&tui->buf, &tui->str_buf, tui->rows, tui->cols);
     fputws(tui->str_buf.data, stdout);
+    if(tui->debug[0] != L'\0') {
+        fputws(tui->debug, stdout);
+    }
     fflush(stdout);
 }
 
@@ -56,6 +62,10 @@ int print_tui(struct tui *tui, struct print_options print_opt, wchar_t *str) {
         }
     }
     return 0;
+}
+
+void debug_tui(struct tui *tui, wchar_t *str) {
+    wcpncpy(tui->debug, str, tui->cols);
 }
 
 void clear(struct tui *tui) {

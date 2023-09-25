@@ -27,6 +27,7 @@ struct tui {
     size_t cols;
     buffer buf;
     struct str_buffer str_buf;
+    wchar_t *debug;
 };
 
 struct print_options {
@@ -41,5 +42,6 @@ void free_tui(struct tui *tui);
 void refresh(struct tui *tui);
 void clear(struct tui *tui);
 int print_tui(struct tui *tui, struct print_options opt, wchar_t *str);
+void debug_tui(struct tui *tui, wchar_t *str);
 
 #endif
