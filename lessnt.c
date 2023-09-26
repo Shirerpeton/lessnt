@@ -10,12 +10,12 @@
 #include <sys/vfs.h>
 #include "tui.h"
 
-const size_t ROWS = 31;
-const size_t COLS = 120;
+const size_t ROWS = 30;
+const size_t COLS = 140;
 const size_t LINE_NUMBER_PREFIX_SIZE = 6;
 const size_t HUD_SIZE = 2;
-const size_t FILE_COLS = COLS - LINE_NUMBER_PREFIX_SIZE;
-const size_t FILE_ROWS = ROWS - HUD_SIZE;
+const size_t FILE_COLS = COLS - LINE_NUMBER_PREFIX_SIZE - 1;
+const size_t FILE_ROWS = ROWS - HUD_SIZE - 1;
 
 struct line {
     wchar_t *data;
@@ -157,24 +157,23 @@ int print_line(
         int *prev_line_number,
         wchar_t *line_num_buf,
         struct line *line) {
+        int result = 0;
         if(*prev_line_number != line->line_number) {
             swprintf(line_num_buf, LINE_NUMBER_PREFIX_SIZE, L"%3d ┃", line->line_number);
             *prev_line_number = line->line_number;
         } else {
             wcpcpy(line_num_buf, L"    ┃");
         }
-        int result = print_tui(tui, *line_print_opts, line_num_buf);
-        if(result != 0) {
-            return result;
-        }
-        result = print_tui(tui, *print_opts, line->data);
-        if(result != 0) {
-            return result;
-        }
+        wchar_t result_line[COLS]; 
+        result += print_tui(tui, *line_print_opts, line_num_buf);
+        result += print_tui(tui, *print_opts, line->data);
+        line_print_opts->x = COLS - 2;
+        result += print_tui(tui, *line_print_opts, L"┃");
+        line_print_opts->x = 0;
         line_print_opts->y++;
         print_opts->y++;
 
-        return 0;
+        return result;
 }
 
 int print_status(struct tui *tui, struct file_context *file_context, struct print_options *line_print_opts) {
@@ -182,43 +181,53 @@ int print_status(struct tui *tui, struct file_context *file_context, struct prin
     uint current_line = file_context->cur_chunk * FILE_ROWS + file_context->cur_chunk_position + FILE_ROWS;
     current_line = current_line > file_context->total_lines ? file_context->total_lines : current_line;
     double file_completed = current_line * 100.0 / file_context->total_lines;
-    swprintf(status, COLS, L"    ┃ %s %.2lf%%", file_context->file_name, file_completed);
-    int result = print_tui(tui, *line_print_opts, status);
-    line_print_opts->y++;
-    wchar_t status_border[COLS];
-    for(uint i = 0; i < COLS - 1; i++) {
-        status_border[i] = L'━';
+    size_t length = swprintf(status, COLS, L"    ┃ %s %.2lf%%", file_context->file_name, file_completed);
+    for(uint i = length; i < COLS; i++) {
+        status[i] = L' ';
     }
-    status_border[4] = L'╋';  
-    status_border[COLS - 1] = L'\0';
-    result = print_tui(tui, *line_print_opts, status_border);
+    status[COLS - 2] = L'┃';
+    status[COLS - 1] = L'\0';
+    int result = print_tui(tui, *line_print_opts, status);
     line_print_opts->y++;
     return result;
 }
 
 int print_file(struct tui *tui, struct file_context *file_context) {
-
     int result = 0;
     wchar_t line_nums[LINE_NUMBER_PREFIX_SIZE];
     struct color line_color = { .r = 200, .g = 50, .b = 80 };
     struct print_options line_print_opts = { .x = 0, .y = 0, .fg_color = &line_color, .bg_color = NULL };
     struct print_options print_opts = { .x = LINE_NUMBER_PREFIX_SIZE, .y = 2, .fg_color = NULL, .bg_color = NULL };
 
-    print_status(tui, file_context, &line_print_opts);
+    wchar_t status_border[COLS];
+    for(uint i = 0; i < COLS - 1; i++) {
+        status_border[i] = L'━';
+    }
+    status_border[4] = L'╋';
+    status_border[COLS - 2] = L'┫';
+    status_border[COLS - 1] = L'\0';
+
+    result += print_status(tui, file_context, &line_print_opts);
+    result += print_tui(tui, line_print_opts, status_border);
+    line_print_opts.y++;
 
     int prev_line_number = -1;
     struct chunk *cur_chunk = &file_context->chunks[file_context->cur_chunk];
     uint max_line = cur_chunk->size < FILE_ROWS ? cur_chunk->size : FILE_ROWS;
     for(uint i = file_context->cur_chunk_position; i < max_line; i++) {
         struct line *cur_line = &cur_chunk->lines[i];
-        result = print_line(tui, &line_print_opts, &print_opts, &prev_line_number, line_nums, cur_line);
+        result + print_line(tui, &line_print_opts, &print_opts, &prev_line_number, line_nums, cur_line);
+
     }
     struct chunk *next_chunk = &file_context->chunks[file_context->cur_chunk + 1];
     max_line = next_chunk->size < file_context->cur_chunk_position ? next_chunk->size : file_context->cur_chunk_position;
     for(uint i = 0; i < max_line; i++) {
         struct line *cur_line = &next_chunk->lines[i];
-        result = print_line(tui, &line_print_opts, &print_opts, &prev_line_number, line_nums, cur_line);
+        result += print_line(tui, &line_print_opts, &print_opts, &prev_line_number, line_nums, cur_line);
     }
+    status_border[4] = L'┻';
+    status_border[COLS - 2] = L'┛';
+    result += print_tui(tui, line_print_opts, status_border);
     return result;
 }
 
